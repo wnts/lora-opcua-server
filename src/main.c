@@ -11,7 +11,7 @@ Description:
 
 License: Revised BSD License, see LICENSE.TXT file include in the project
 Maintainer: Sylvain Miermont
-*/
+ */
 
 
 /* -------------------------------------------------------------------------- */
@@ -19,9 +19,9 @@ Maintainer: Sylvain Miermont
 
 /* fix an issue between POSIX and C99 */
 #if __STDC_VERSION__ >= 199901L
-	#define _XOPEN_SOURCE 600
+#define _XOPEN_SOURCE 600
 #else
-	#define _XOPEN_SOURCE 500
+#define _XOPEN_SOURCE 500
 #endif
 
 #include <stdint.h>		/* C99 types */
@@ -64,8 +64,8 @@ Maintainer: Sylvain Miermont
 #define PAYLOAD_DATA_BUF_SIZE 512
 
 static const unsigned char default_AppSKey[] = {
-    0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6,
-    0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C
+		0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6,
+		0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C
 };
 
 typedef struct {
@@ -100,18 +100,18 @@ void process_payload(const char *payload, char *time, char *data, size_t *size)
 	//TODO: there can be several rxpk objects in one payload
 	JSON_Value *payload_root_value;
 	JSON_Value *payload_identifier_value;
-    JSON_Object *payload_identifier_object;
+	JSON_Object *payload_identifier_object;
 	JSON_Array *payload_content_array;
 	JSON_Object *payload_content_object;
-    size_t i;
-    const char *time_string;
-    const char *data_string;
+	size_t i;
+	const char *time_string;
+	const char *data_string;
 
-    *size = 0;
-    *data = '\0';
-    *time = '\0';
+	*size = 0;
+	*data = '\0';
+	*time = '\0';
 
-    MSG("\nProcessing Payload\n");
+	MSG("\nProcessing Payload\n");
 
 	/* parsing json and validating output */
 	payload_root_value = json_parse_string(payload);
@@ -172,7 +172,7 @@ void process_payload(const char *payload, char *time, char *data, size_t *size)
 int main(int argc, char **argv)
 {
 	int i; /* loop variable and temporary variable for return value */
-	
+
 	/* server socket creation */
 	int sock; /* socket file descriptor */
 	struct addrinfo hints;
@@ -180,19 +180,19 @@ int main(int argc, char **argv)
 	struct addrinfo *q; /* pointer to move into *result data */
 	char host_name[64];
 	char port_name[64];
-	
+
 	/* variables for receiving and sending packets */
 	struct sockaddr_storage dist_addr;
 	socklen_t addr_len = sizeof dist_addr;
 	uint8_t databuf[4096];
 	int byte_nb;
-	
+
 	/* variables for protocol management */
 	uint32_t raw_mac_h; /* Most Significant Nibble, network order */
 	uint32_t raw_mac_l; /* Least Significant Nibble, network order */
 	uint64_t gw_mac; /* MAC address of the client (gateway) */
 	uint8_t ack_command;
-	
+
 	/* variables for receiving payloads */
 	size_t payload_size_encoded;
 	size_t payload_size_decoded;
@@ -218,7 +218,7 @@ int main(int argc, char **argv)
 		MSG("Usage: util_ack <port number>\n");
 		exit(EXIT_FAILURE);
 	}
-	
+
 	/* prepare AES */
 	mbedtls_aes_init(&aes_ctx);
 	mbedtls_aes_setkey_dec(&aes_ctx, default_AppSKey, 128);
@@ -228,14 +228,14 @@ int main(int argc, char **argv)
 	hints.ai_family = AF_UNSPEC; /* should handle IP v4 or v6 automatically */
 	hints.ai_socktype = SOCK_DGRAM;
 	hints.ai_flags = AI_PASSIVE; /* will assign local IP automatically */
-	
+
 	/* look for address */
 	i = getaddrinfo(NULL, argv[1], &hints, &result);
 	if (i != 0) {
 		MSG("ERROR: getaddrinfo returned %s\n", gai_strerror(i));
 		exit(EXIT_FAILURE);
 	}
-	
+
 	/* try to open socket and bind it */
 	for (q=result; q!=NULL; q=q->ai_next) {
 		sock = socket(q->ai_family, q->ai_socktype,q->ai_protocol);
@@ -263,7 +263,7 @@ int main(int argc, char **argv)
 	}
 	MSG("INFO: util_ack listening on port %s\n", argv[1]);
 	freeaddrinfo(result);
-	
+
 	while (1) {
 		/* wait to receive a packet */
 		byte_nb = recvfrom(sock, databuf, sizeof databuf, 0, (struct sockaddr *)&dist_addr, &addr_len);
@@ -271,7 +271,7 @@ int main(int argc, char **argv)
 			MSG("ERROR: recvfrom returned %s \n", strerror(errno));
 			exit(EXIT_FAILURE);
 		}
-		
+
 		/* display info about the sender */
 		i = getnameinfo((struct sockaddr *)&dist_addr, addr_len, host_name, sizeof host_name, port_name, sizeof port_name, NI_NUMERICHOST);
 		if (i == -1) {
@@ -279,7 +279,7 @@ int main(int argc, char **argv)
 			exit(EXIT_FAILURE);
 		}
 		printf(" -> pkt in , host %s (port %s), %i bytes", host_name, port_name, byte_nb);
-		
+
 		/* check and parse the payload */
 		if (byte_nb < 12) { /* not enough bytes for packet from gateway */
 			printf(" (too short for GW <-> MAC protocol)\n");
@@ -293,22 +293,22 @@ int main(int argc, char **argv)
 		raw_mac_h = *((uint32_t *)(databuf+4));
 		raw_mac_l = *((uint32_t *)(databuf+8));
 		gw_mac = ((uint64_t)ntohl(raw_mac_h) << 32) + (uint64_t)ntohl(raw_mac_l);
-		
+
 		/* interpret gateway command */
 		switch (databuf[3]) {
-			case PKT_PUSH_DATA:
-				printf(", PUSH_DATA from gateway 0x%08X%08X\n", (uint32_t)(gw_mac >> 32), (uint32_t)(gw_mac & 0xFFFFFFFF));
-				ack_command = PKT_PUSH_ACK;
-				printf("<-  pkt out, PUSH_ACK for host %s (port %s)", host_name, port_name);
-				break;
-			case PKT_PULL_DATA:
-				printf(", PULL_DATA from gateway 0x%08X%08X\n", (uint32_t)(gw_mac >> 32), (uint32_t)(gw_mac & 0xFFFFFFFF));
-				ack_command = PKT_PULL_ACK;
-				printf("<-  pkt out, PULL_ACK for host %s (port %s)", host_name, port_name);
-				break;
-			default:
-				printf(", unexpected command %u\n", databuf[3]);
-				continue;
+		case PKT_PUSH_DATA:
+			printf(", PUSH_DATA from gateway 0x%08X%08X\n", (uint32_t)(gw_mac >> 32), (uint32_t)(gw_mac & 0xFFFFFFFF));
+			ack_command = PKT_PUSH_ACK;
+			printf("<-  pkt out, PUSH_ACK for host %s (port %s)", host_name, port_name);
+			break;
+		case PKT_PULL_DATA:
+			printf(", PULL_DATA from gateway 0x%08X%08X\n", (uint32_t)(gw_mac >> 32), (uint32_t)(gw_mac & 0xFFFFFFFF));
+			ack_command = PKT_PULL_ACK;
+			printf("<-  pkt out, PULL_ACK for host %s (port %s)", host_name, port_name);
+			break;
+		default:
+			printf(", unexpected command %u\n", databuf[3]);
+			continue;
 		}
 
 		print_payload(&databuf[12]);
@@ -319,7 +319,7 @@ int main(int argc, char **argv)
 		/* Base64 Decode the PHYPayload */
 		if (payload_size_encoded > 0) {
 			rc = mbedtls_base64_decode(payload_data_decoded, PAYLOAD_DATA_BUF_SIZE, &payload_size_decoded,
-			                   payload_data_encoded, strlen(payload_data_encoded));
+					payload_data_encoded, strlen(payload_data_encoded));
 			MSG("base64 decode return: %d\n", rc);
 			MSG("payload encoded size: %d decoded size: %d\n", payload_size_encoded, payload_size_decoded);
 			MSG("MHDR=0x%x\n", payload_data_decoded[0]);
@@ -338,7 +338,8 @@ int main(int argc, char **argv)
 			MSG("MHDR=0x%x\n", phy_payload.MHDR);
 
 			memcpy(phy_payload.DevAddr, payload_data_decoded + 1, 4);
-			MSG("DevAddr=%02x:%02x:%02x:%02x\n", phy_payload.DevAddr[0], phy_payload.DevAddr[1], phy_payload.DevAddr[2], phy_payload.DevAddr[3]);
+			MSG("DevAddr=%02x:%02x:%02x:%02x\n", phy_payload.DevAddr[0], phy_payload.DevAddr[1],
+					phy_payload.DevAddr[2], phy_payload.DevAddr[3]);
 
 			memcpy(&phy_payload.FCtrl, payload_data_decoded+5, 1);
 			MSG("FCtrl=0x%x\n", phy_payload.FCtrl);
@@ -353,11 +354,8 @@ int main(int argc, char **argv)
 			memcpy(&phy_payload.FPort, payload_data_decoded+8+FOptsLen, 1);
 			MSG("FPort=%d\n", phy_payload.FPort);
 
-			FRMPayloadLen = (size_t)
-					/* address of end of frame - MIC */
-					( (payload_data_decoded+payload_size_decoded-4)
-				    /* address of beginning of FRMPayLoad */
-					- (payload_data_decoded+9+FOptsLen));
+			FRMPayloadLen = (size_t) ((payload_data_decoded+payload_size_decoded-4) /* address of end of frame - MIC */
+					- (payload_data_decoded+9+FOptsLen));                           /* address of beginning of FRMPayLoad */
 			printf("frmpayloadlen:%d\n", FRMPayloadLen);
 
 			memcpy(phy_payload.FRMPayload, payload_data_decoded+9+FOptsLen, FRMPayloadLen);
@@ -393,7 +391,7 @@ int main(int argc, char **argv)
 
 		/* add some artificial latency */
 		usleep(30000); /* 30 ms */
-		
+
 		/* send acknowledge and check return value */
 		databuf[3] = ack_command;
 		byte_nb = sendto(sock, (void *)databuf, 4, 0, (struct sockaddr *)&dist_addr, addr_len);
