@@ -38,7 +38,9 @@ Maintainer: Sylvain Miermont
 #include <arpa/inet.h>  /* IP address conversion stuff */
 #include <netdb.h>		/* gai_strerror */
 
-#include "parson.h"
+#include "parson.h"		/* JSON parsing */
+#include <base64.h>		/* mbed TLS for decoding base64 */
+#include <aes.h>		/* for decryping the FRMPayload */
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE MACROS ------------------------------------------------------- */
@@ -59,6 +61,25 @@ Maintainer: Sylvain Miermont
 #define PKT_PULL_RESP	3
 #define PKT_PULL_ACK	4
 
+#define PAYLOAD_DATA_BUF_SIZE 512
+
+static const unsigned char default_AppSKey[] = {
+    0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6,
+    0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C
+};
+
+typedef struct {
+	unsigned char MHDR;
+	unsigned char DevAddr[4];
+	unsigned char FCtrl;
+	unsigned char FCnt[2];
+	unsigned char FOpts[15];
+	unsigned char FHDR[23];
+	unsigned char FPort;
+	unsigned char FRMPayload[250]; /* Maximum allowed for Datarate 7 */
+	unsigned char MIC[4];
+} PhyPayload;
+
 void print_payload(char * payload)
 {
 	JSON_Array * values;
@@ -71,12 +92,79 @@ void print_payload(char * payload)
 	puts(serialized_string);
 	json_free_serialized_string(serialized_string);
 	json_value_free(root_value);
-
-
-
-
-
 }
+
+void process_payload(const char *payload, char *time, char *data, size_t *size)
+{
+	//TODO: there can be a mix of stat/rxpk in one payload
+	//TODO: there can be several rxpk objects in one payload
+	JSON_Value *payload_root_value;
+	JSON_Value *payload_identifier_value;
+    JSON_Object *payload_identifier_object;
+	JSON_Array *payload_content_array;
+	JSON_Object *payload_content_object;
+    size_t i;
+    const char *time_string;
+    const char *data_string;
+
+    *size = 0;
+    *data = '\0';
+    *time = '\0';
+
+    MSG("\nProcessing Payload\n");
+
+	/* parsing json and validating output */
+	payload_root_value = json_parse_string(payload);
+	if (json_value_get_type(payload_root_value) != JSONObject) {
+		MSG("Error: payload root value is not a JSONObject\n");
+		json_value_free(payload_root_value);
+		return;
+	}
+
+	payload_identifier_object = json_value_get_object(payload_root_value);
+	if (json_object_get_count(payload_identifier_object) != 1) {
+		MSG("Error: payload identifier cannot be determined");
+		json_value_free(payload_root_value);
+		return;
+	}
+	/* Ignore status payloads */
+	if (strcmp(json_object_get_name(payload_identifier_object, 0), "stat") == 0) {
+		json_value_free(payload_root_value);
+		return;
+	}
+	if (strcmp(json_object_get_name(payload_identifier_object, 0), "rxpk") == 1) {
+		MSG("Error: payload identifier unkown");
+		json_value_free(payload_root_value);
+		return;
+	}
+
+	payload_identifier_value = json_object_get_value(
+			payload_identifier_object,
+			json_object_get_name(payload_identifier_object, 0));
+	if (json_value_get_type(payload_identifier_value) != JSONArray) {
+		MSG("Error: payload identifier value is not a JSONArray\n");
+		json_value_free(payload_root_value);
+		return;
+	}
+
+	payload_content_array = json_value_get_array(payload_identifier_value);
+	for (i = 0; i < json_array_get_count(payload_content_array); i++) {
+		payload_content_object = json_array_get_object(payload_content_array, i);
+
+		*size = (size_t)json_object_get_number(payload_content_object, "size");
+		data_string = json_object_get_string(payload_content_object, "data");
+		time_string = json_object_get_string(payload_content_object, "time");
+
+		strcpy(data, data_string);
+		strcpy(time, time_string);
+
+		MSG("%s data:\"%s\" (%d bytes)\n", time, data, *size);
+	}
+
+	/* cleanup code */
+	json_value_free(payload_root_value);
+}
+
 
 /* -------------------------------------------------------------------------- */
 /* --- MAIN FUNCTION -------------------------------------------------------- */
@@ -105,12 +193,36 @@ int main(int argc, char **argv)
 	uint64_t gw_mac; /* MAC address of the client (gateway) */
 	uint8_t ack_command;
 	
+	/* variables for receiving payloads */
+	size_t payload_size_encoded;
+	size_t payload_size_decoded;
+
+	unsigned char payload_data_encoded[PAYLOAD_DATA_BUF_SIZE];
+	unsigned char payload_data_decoded[PAYLOAD_DATA_BUF_SIZE];
+	unsigned char payload_timestamp[32];
+
+	PhyPayload phy_payload;
+	size_t FOptsLen;
+	size_t FRMPayloadLen;
+
+	mbedtls_aes_context aes_ctx;
+	size_t aes_offset = 0;
+	unsigned char aes_nonce_counter[16];
+	unsigned char aes_stream_block[16];
+	unsigned char FRMPayload_decrypted[250];
+
+	int rc;
+
 	/* check if port number was passed as parameter */
 	if (argc != 2) {
 		MSG("Usage: util_ack <port number>\n");
 		exit(EXIT_FAILURE);
 	}
 	
+	/* prepare AES */
+	mbedtls_aes_init(&aes_ctx);
+	mbedtls_aes_setkey_dec(&aes_ctx, default_AppSKey, 128);
+
 	/* prepare hints to open network sockets */
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC; /* should handle IP v4 or v6 automatically */
@@ -198,14 +310,86 @@ int main(int argc, char **argv)
 				printf(", unexpected command %u\n", databuf[3]);
 				continue;
 		}
-		/*
-		printf(" PAYLOAD: ");
-		i = 12;
-		for(i= 12; i != byte_nb; i++)
-			printf("%c", databuf[i]);
-*/
+
 		print_payload(&databuf[12]);
 
+		/* Get the encoded PHYPayload from the data field */
+		process_payload(&databuf[12], payload_timestamp, payload_data_encoded, &payload_size_encoded);
+
+		/* Base64 Decode the PHYPayload */
+		if (payload_size_encoded > 0) {
+			rc = mbedtls_base64_decode(payload_data_decoded, PAYLOAD_DATA_BUF_SIZE, &payload_size_decoded,
+			                   payload_data_encoded, strlen(payload_data_encoded));
+			MSG("base64 decode return: %d\n", rc);
+			MSG("payload encoded size: %d decoded size: %d\n", payload_size_encoded, payload_size_decoded);
+			MSG("MHDR=0x%x\n", payload_data_decoded[0]);
+			MSG("DevAddr=%02x:%02x:%02x:%02x\n", payload_data_decoded[1], payload_data_decoded[2], payload_data_decoded[3], payload_data_decoded[4]);
+			MSG("complete decoded payload:\n");
+			for (i=0;i<payload_size_decoded;i++) {
+				printf("0x%02x ", payload_data_decoded[i]);
+				if (i%16 == 0 && i>0) { printf("\n"); }
+			}
+			MSG("\n");
+
+			/* Map the payload to the PhyPayload Struct */
+			memset(&phy_payload, 0, sizeof(PhyPayload));
+
+			memcpy(&phy_payload.MHDR, payload_data_decoded, 1);
+			MSG("MHDR=0x%x\n", phy_payload.MHDR);
+
+			memcpy(phy_payload.DevAddr, payload_data_decoded + 1, 4);
+			MSG("DevAddr=%02x:%02x:%02x:%02x\n", phy_payload.DevAddr[0], phy_payload.DevAddr[1], phy_payload.DevAddr[2], phy_payload.DevAddr[3]);
+
+			memcpy(&phy_payload.FCtrl, payload_data_decoded+5, 1);
+			MSG("FCtrl=0x%x\n", phy_payload.FCtrl);
+
+			memcpy(&phy_payload.FCnt, payload_data_decoded+6, 2);
+			MSG("FCnt=%d\n", (uint16_t)(*phy_payload.FCnt));
+
+			FOptsLen = (size_t)(phy_payload.FCtrl && 0x3);
+			printf("foptslen:%d\n", FOptsLen);
+
+			memcpy(phy_payload.FOpts, payload_data_decoded+8, FOptsLen);
+			memcpy(&phy_payload.FPort, payload_data_decoded+8+FOptsLen, 1);
+			MSG("FPort=%d\n", phy_payload.FPort);
+
+			FRMPayloadLen = (size_t)
+					/* address of end of frame - MIC */
+					( (payload_data_decoded+payload_size_decoded-4)
+				    /* address of beginning of FRMPayLoad */
+					- (payload_data_decoded+9+FOptsLen));
+			printf("frmpayloadlen:%d\n", FRMPayloadLen);
+
+			memcpy(phy_payload.FRMPayload, payload_data_decoded+9+FOptsLen, FRMPayloadLen);
+			memcpy(phy_payload.MIC, payload_data_decoded+payload_size_decoded-4, 4);
+
+			printf("frmpayload encrypted:\n");
+			for (i=0;i<FRMPayloadLen;i++) {
+				printf("0x%02x ", phy_payload.FRMPayload[i]);
+				if (i%16 == 0 && i>0) { printf("\n"); }
+			}
+
+			memset(aes_nonce_counter, 0, 16);
+			memset(aes_stream_block, 0, 16);
+
+			/* Decrypt the FRMPayload using the known AES key */
+			rc = mbedtls_aes_crypt_ctr(&aes_ctx,
+					FRMPayloadLen,
+					&aes_offset,
+					aes_nonce_counter,
+					aes_stream_block,
+					phy_payload.FRMPayload,
+					FRMPayload_decrypted);
+			printf("\nrc from aes:%d\n", rc);
+
+			printf("frmpayload decrypted:\n");
+			for (i=0;i<FRMPayloadLen;i++) {
+				printf("0x%02x ", FRMPayload_decrypted[i]);
+				if (i%16 == 0 && i>0) { printf("\n");}
+			}
+			printf("\n");
+			//printf("Plain decrypted result: %s\n", FRMPayload_decrypted);
+		}
 
 		/* add some artificial latency */
 		usleep(30000); /* 30 ms */
