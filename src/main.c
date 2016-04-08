@@ -360,6 +360,8 @@ int main(int argc, char **argv)
 
 			memcpy(phy_payload.FRMPayload, payload_data_decoded+9+FOptsLen, FRMPayloadLen);
 			memcpy(phy_payload.MIC, payload_data_decoded+payload_size_decoded-4, 4);
+			MSG("MIC=0x%x%x%x%x\n", phy_payload.MIC[0], phy_payload.MIC[1], phy_payload.MIC[2], phy_payload.MIC[3]);
+
 
 			printf("frmpayload encrypted:\n");
 			for (i=0;i<FRMPayloadLen;i++) {
