@@ -221,7 +221,7 @@ int main(int argc, char **argv)
 
 	/* prepare AES */
 	mbedtls_aes_init(&aes_ctx);
-	mbedtls_aes_setkey_dec(&aes_ctx, default_AppSKey, 128);
+	mbedtls_aes_setkey_enc(&aes_ctx, default_AppSKey, 128);
 
 	/* prepare hints to open network sockets */
 	memset(&hints, 0, sizeof hints);
@@ -322,14 +322,12 @@ int main(int argc, char **argv)
 					payload_data_encoded, strlen(payload_data_encoded));
 			MSG("base64 decode return: %d\n", rc);
 			MSG("payload encoded size: %d decoded size: %d\n", payload_size_encoded, payload_size_decoded);
-			MSG("MHDR=0x%x\n", payload_data_decoded[0]);
-			MSG("DevAddr=%02x:%02x:%02x:%02x\n", payload_data_decoded[1], payload_data_decoded[2], payload_data_decoded[3], payload_data_decoded[4]);
-			MSG("complete decoded payload:\n");
+			/*MSG("complete decoded payload:\n");
 			for (i=0;i<payload_size_decoded;i++) {
 				printf("0x%02x ", payload_data_decoded[i]);
 				if (i%16 == 0 && i>0) { printf("\n"); }
 			}
-			MSG("\n");
+			MSG("\n");*/
 
 			/* Map the payload to the PhyPayload Struct */
 			memset(&phy_payload, 0, sizeof(PhyPayload));
@@ -362,15 +360,37 @@ int main(int argc, char **argv)
 			memcpy(phy_payload.MIC, payload_data_decoded+payload_size_decoded-4, 4);
 			MSG("MIC=0x%x%x%x%x\n", phy_payload.MIC[0], phy_payload.MIC[1], phy_payload.MIC[2], phy_payload.MIC[3]);
 
-
+/*
 			printf("frmpayload encrypted:\n");
 			for (i=0;i<FRMPayloadLen;i++) {
 				printf("0x%02x ", phy_payload.FRMPayload[i]);
 				if (i%16 == 0 && i>0) { printf("\n"); }
-			}
+			}*/
 
-			memset(aes_nonce_counter, 0, 16);
+
+
+
+			/* Construct counter for using CTR mode on AES
+			 * The format of the counter is specified in the LoraWan specification
+			 * WARNING: the nonce counter is a 16-byte number stored in little-endian format
+			 * 			any of its (multi-byte) subfields are also little-endian
+			 * */
+			aes_offset = 0;
 			memset(aes_stream_block, 0, 16);
+			memset(aes_nonce_counter, 0, 16);
+			aes_nonce_counter[0] = 0x01;	// hard-coded constant from spec
+			// aes_nonce_counter[1-4] == 0 already from memset
+			aes_nonce_counter[5] = 0; 		// Uplink frame = 0
+			// aes_nonce_counter[6-9] = DevAddr
+			memcpy(&aes_nonce_counter[6], phy_payload.DevAddr, sizeof(phy_payload.DevAddr));
+			// FCnt field is zero extended to 32 bits
+			aes_nonce_counter[10] = phy_payload.FCnt[0];
+			aes_nonce_counter[11] = phy_payload.FCnt[1];
+			aes_nonce_counter[12] = 0x00;
+			aes_nonce_counter[13] = 0x00;
+			//aes_nonce_counter[14] == 0 already from memset
+			// actual "counter" that is incremented in CTR mode for every 16-byte block
+			aes_nonce_counter[15] = 1;
 
 			/* Decrypt the FRMPayload using the known AES key */
 			rc = mbedtls_aes_crypt_ctr(&aes_ctx,
@@ -381,14 +401,18 @@ int main(int argc, char **argv)
 					phy_payload.FRMPayload,
 					FRMPayload_decrypted);
 			printf("\nrc from aes:%d\n", rc);
-
+			printf("offset after aes:%d\n", aes_offset);
 			printf("frmpayload decrypted:\n");
+			/*
 			for (i=0;i<FRMPayloadLen;i++) {
 				printf("0x%02x ", FRMPayload_decrypted[i]);
+				printf("%c", FRMPayload_decrypted[i]);
 				if (i%16 == 0 && i>0) { printf("\n");}
-			}
+			}*/
 			printf("\n");
-			//printf("Plain decrypted result: %s\n", FRMPayload_decrypted);
+			// make sure it's null-terminated
+			FRMPayload_decrypted[FRMPayloadLen] = '\0';
+			printf("Plain decrypted result: %s\n", FRMPayload_decrypted);
 		}
 
 		/* add some artificial latency */
