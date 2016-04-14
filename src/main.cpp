@@ -30,6 +30,7 @@ Maintainer: Sylvain Miermont
 #include <stdint.h>		/* C99 types */
 #include <stdio.h>		/* printf, fprintf, sprintf, fopen, fputs */
 #include <unistd.h>		/* usleep */
+#include <stddef.h>		/* offsetof */
 
 #include <string.h>		/* memset */
 #include <time.h>		/* time, clock_gettime, strftime, gmtime, clock_nanosleep*/
@@ -72,15 +73,27 @@ static const unsigned char default_AppSKey[] = {
 };
 
 typedef struct {
-	unsigned char MHDR;
 	unsigned char DevAddr[4];
 	unsigned char FCtrl;
 	unsigned char FCnt[2];
 	unsigned char FOpts[15];
-	unsigned char FHDR[23];
+} Fhdr;
+
+typedef struct {
+	Fhdr FHDR;
 	unsigned char FPort;
 	unsigned char FRMPayload[250]; /* Maximum allowed for Datarate 7 */
 	unsigned char FRMPayloadLen;
+} MacPayload;
+
+/**
+ * C Struct representation of a PHYPayload package as
+ * specified in the LoraWan specification.
+ *
+ */
+typedef struct {
+	unsigned char MHDR;
+	MacPayload MACPayload;
 	unsigned char MIC[4];
 } PhyPayload;
 
@@ -221,17 +234,10 @@ cleanup:
 	json_value_free(payload_root_value);
 	return pRetList;
 }
-/*
- * @return Nonzero on success, zero on failure
- */
-int process_payload(const char *payload, char *time, char *data, size_t *size)
-{
-
-}
 
 /**
  * Decrypt the FRMPayload in the given PhyPayload structure.
- * Decryption is done in place, so FRMPayLoad field of phy_payload
+ * Decryption is done in place, so the FRMPayLoad field of phy_payload
  * will contain the plaintext payload
  *
  * @param	phy_payload	Pointer to PhyPayload whose FRMPayload needs to be decrypted
@@ -252,9 +258,7 @@ int decrypt_frmpayload(PhyPayload * phy_payload, const unsigned char * aesKey)
 	mbedtls_aes_setkey_enc(&aes_ctx, default_AppSKey, 128);
 	/* Construct counter for using CTR mode on AES
 	 * The format of the counter is specified in the LoraWan specification
-	 * WARNING: the nonce counter is a 16-byte number stored in big-endian format
-	 *
-	 * 			any of its (multi-byte) subfields are also little-endian
+	 * WARNING: any of the nonce counter's (multi-byte) subfields are little-endian
 	 * */
 	memset(aes_stream_block, 0, 16);
 	memset(aes_nonce_counter, 0, 16);
@@ -262,10 +266,10 @@ int decrypt_frmpayload(PhyPayload * phy_payload, const unsigned char * aesKey)
 	// aes_nonce_counter[1-4] == 0 already from memset
 	aes_nonce_counter[5] = 0; 		// Uplink frame = 0
 	// aes_nonce_counter[6-9] = DevAddr
-	memcpy(&aes_nonce_counter[6], phy_payload->DevAddr, sizeof(phy_payload->DevAddr));
+	memcpy(&aes_nonce_counter[6], phy_payload->MACPayload.FHDR.DevAddr, sizeof(phy_payload->MACPayload.FHDR.DevAddr));
 	// FCnt field is zero extended to 32 bits
-	aes_nonce_counter[10] = phy_payload->FCnt[0];
-	aes_nonce_counter[11] = phy_payload->FCnt[1];
+	aes_nonce_counter[10] = phy_payload->MACPayload.FHDR.FCnt[0];
+	aes_nonce_counter[11] = phy_payload->MACPayload.FHDR.FCnt[1];
 	aes_nonce_counter[12] = 0x00;
 	aes_nonce_counter[13] = 0x00;
 	//aes_nonce_counter[14] == 0 already from memset
@@ -274,17 +278,17 @@ int decrypt_frmpayload(PhyPayload * phy_payload, const unsigned char * aesKey)
 
 	/* Decrypt the FRMPayload using the known AES key */
 	if(mbedtls_aes_crypt_ctr(&aes_ctx,
-							 phy_payload->FRMPayloadLen,
+							 phy_payload->MACPayload.FRMPayloadLen,
 							 &aes_offset,
 							 aes_nonce_counter,
 							 aes_stream_block,
-							 phy_payload->FRMPayload,
-							 phy_payload->FRMPayload) != 0)
+							 phy_payload->MACPayload.FRMPayload,
+							 phy_payload->MACPayload.FRMPayload) != 0)
 	{
 		MSG("Error decrypting FRMPayload");
 		return 0;
 	}
-	MSG("Plain payload: %s\n", phy_payload->FRMPayload);
+
 
 }
 
@@ -298,18 +302,30 @@ int decrypt_frmpayload(PhyPayload * phy_payload, const unsigned char * aesKey)
 int phypayload_parse(PhyPayload * phy_payload, unsigned char * raw_payload, size_t raw_payload_size)
 {
 	size_t FOptsLen = 0;
-	memset(phy_payload, 0, sizeof(PhyPayload));
-	memcpy(&phy_payload->MHDR, raw_payload, 1);
-	memcpy(&phy_payload->DevAddr, raw_payload + 1, 4);
-	memcpy(&phy_payload->FCtrl, raw_payload+5, 1);
-	memcpy(&phy_payload->FCnt, raw_payload+6, 2);
-	FOptsLen = (size_t)(phy_payload->FCtrl && 0x3);
-	memcpy(&phy_payload->FOpts, raw_payload+8, FOptsLen);
-	memcpy(&phy_payload->FPort, raw_payload+8+FOptsLen, 1);
-	phy_payload->FRMPayloadLen = (size_t) ((raw_payload+raw_payload_size-4) /* address of end of frame - MIC */
-			- (raw_payload+9+FOptsLen));                           /* address of beginning of FRMPayLoad */
-	memcpy(&phy_payload->FRMPayload, raw_payload+9+FOptsLen, phy_payload->FRMPayloadLen);
-	memcpy(&phy_payload->MIC, raw_payload+raw_payload_size-4, 4);
+	memcpy(&phy_payload->MHDR,
+		   raw_payload + offsetof(PhyPayload, MHDR),
+		   sizeof(phy_payload->MHDR));
+	memcpy(&phy_payload->MACPayload.FHDR.DevAddr,
+		   raw_payload + offsetof(PhyPayload, MACPayload.FHDR.DevAddr),
+		   sizeof(phy_payload->MACPayload.FHDR.DevAddr));
+	memcpy(&phy_payload->MACPayload.FHDR.FCtrl,
+		   raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FCtrl),
+		   sizeof(phy_payload->MACPayload.FHDR.FCtrl));
+	memcpy(&phy_payload->MACPayload.FHDR.FCnt,
+		   raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FCnt),
+		   sizeof(phy_payload->MACPayload.FHDR.FCnt));
+
+	FOptsLen = (size_t)(phy_payload->MACPayload.FHDR.FCtrl & 0x3);
+	memcpy(&phy_payload->MACPayload.FHDR.FOpts,
+		   raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FOpts) ,
+		   FOptsLen);
+	memcpy(&phy_payload->MACPayload.FPort,
+		   raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FOpts) + FOptsLen,
+		   sizeof(phy_payload->MACPayload.FPort));
+	phy_payload->MACPayload.FRMPayloadLen = (size_t) ((raw_payload + raw_payload_size - sizeof(phy_payload->MIC)) 					 /* address of end of frame - MIC */
+													   - (raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FOpts) + FOptsLen));    /* address of beginning of FRMPayLoad */
+	memcpy(&phy_payload->MACPayload.FRMPayload, raw_payload+9+FOptsLen, phy_payload->MACPayload.FRMPayloadLen);
+	memcpy(&phy_payload->MIC, raw_payload + raw_payload_size - sizeof(phy_payload->MIC), sizeof(phy_payload->MIC));
 
 }
 
@@ -448,7 +464,6 @@ int main(int argc, char **argv)
 		}
 
 		print_simple_payload(&databuf[12]);
-
 		shared_ptr<forward_list<RxpkObject>> pRes = parse_simple_payload(&databuf[12]);
 		if(pRes)
 		{
@@ -466,9 +481,9 @@ int main(int argc, char **argv)
 										   strlen((unsigned char *)it->base64data));
 				/* Map the payload to the PhyPayload Struct */
 				phypayload_parse(&phy_payload, phypayload_decoded, phypayload_decoded_size);
-
 				/* Decrypt the FRMPayload of the PhyPayload */
 				decrypt_frmpayload(&phy_payload, default_AppSKey);
+				printf("OBJECT %d DECRYPTED PAYLOAD: %s\n", i, phy_payload.MACPayload.FRMPayload);
 			}
 			printf("PROCESSED %d OBJECTS IN RXPK ARRAY\n", i);
 		}
