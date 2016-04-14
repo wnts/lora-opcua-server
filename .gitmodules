@@ -1,6 +1,3 @@
 [submodule "freeopcua-test"]
 	path = freeopcua-test
 	url = https://github.com/wnts/freeopcua-test.git
-[submodule "mbedtls"]
-	path = mbedtls
-	url = https://github.com/mbedtls/mbedtls.git
