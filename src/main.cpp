@@ -324,7 +324,7 @@ int phypayload_parse(PhyPayload * phy_payload, unsigned char * raw_payload, size
 		   sizeof(phy_payload->MACPayload.FPort));
 
 	phy_payload->MACPayload.FRMPayloadLen = (size_t) ((raw_payload + raw_payload_size - sizeof(phy_payload->MIC)) 					 /* address of end of frame - MIC */
-													   - (raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FOpts) + FOptsLen));    /* address of beginning of FRMPayLoad */
+													   - (raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FOpts) + FOptsLen));                    /* address of beginning of FRMPayLoad */
 	memcpy(&phy_payload->MACPayload.FRMPayload, raw_payload+9+FOptsLen, phy_payload->MACPayload.FRMPayloadLen);
 	memcpy(&phy_payload->MIC, raw_payload + raw_payload_size - sizeof(phy_payload->MIC), sizeof(phy_payload->MIC));
 
