@@ -42,9 +42,12 @@ Maintainer: Sylvain Miermont
 #include <arpa/inet.h>  /* IP address conversion stuff */
 #include <netdb.h>		/* gai_strerror */
 
-#include "parson.h"		/* JSON parsing */
-#include <mbedtls/base64.h>		/* mbed TLS for decoding base64 */
-#include <mbedtls/aes.h>		/* for decryping the FRMPayload */
+#include "parson.h"					/* JSON parsing */
+#include "lora.h"					/* Lora PHY and MAC packet operations */
+#include "packet_fwd_protocol.h"	/* Packet forwarder protocol operations */
+#include "mbedtls/base64.h"
+
+#include "opcserver.h"
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE MACROS ------------------------------------------------------- */
@@ -72,263 +75,10 @@ static const unsigned char default_AppSKey[] = {
 		0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C
 };
 
-typedef struct {
-	unsigned char DevAddr[4];
-	unsigned char FCtrl;
-	unsigned char FCnt[2];
-	unsigned char FOpts[15];
-} Fhdr;
-
-typedef struct {
-	Fhdr FHDR;
-	unsigned char FPort;
-	unsigned char FRMPayload[250]; /* Maximum allowed for Datarate 7 */
-	unsigned char FRMPayloadLen;
-} MacPayload;
-
-/**
- * C Struct representation of a PHYPayload package as
- * specified in the LoraWan specification.
- *
- */
-typedef struct {
-	unsigned char MHDR;
-	MacPayload MACPayload;
-	unsigned char MIC[4];
-} PhyPayload;
-
-typedef struct {
-	struct tm time;
-	uint32_t tmst;
-	float freq;
-	unsigned int chan;
-	unsigned int rfch;
-	char stat;
-	char modu[5] = "";
-	unsigned int datr;
-	// todo how long should this be?
-	char codr[10] = "";
-	int rssi;
-	float lsnr;
-	size_t size;
-	// todo how long should this be?
-	char base64data[400] = "";
-} RxpkObject;
-
 using namespace std;
 
-void print_simple_payload(char * payload)
-{
-	JSON_Array * values;
-	JSON_Value * root_value;
-	char * serialized_string = NULL;
-
-	root_value = json_parse_string(payload);
-	serialized_string = json_serialize_to_string_pretty(root_value);
-	printf(" PAYLOAD :");
-	puts(serialized_string);
-	json_free_serialized_string(serialized_string);
-	json_value_free(root_value);
-}
-/**
- * Parse the payload of the simple protocol defined by the Packet Forwarder.
- *
- * @param payload	Pointer to buffer containing the root JSON object. This object is
- * 					found in the UDP datagrams sent by the packet forwarder
- * @return	On success a pointer to a list of RxpkObjects.
- * 			On failure, returns a null pointer.
- */
-shared_ptr<forward_list<RxpkObject>> parse_simple_payload(const char *payload)
-{
-	//TODO: there can be a mix of stat/rxpk in one payload
-	//TODO: there can be several rxpk objects in one payload
-	JSON_Value *payload_root_value;
-	JSON_Value *payload_identifier_value;
-	JSON_Object *payload_identifier_object;
-	JSON_Array *payload_content_array;
-	JSON_Object *payload_content_object;
-	size_t i;
-	const char *time_string;
-	const char *data_string;
-	shared_ptr<forward_list<RxpkObject>> pRetList = make_shared<forward_list<RxpkObject>>();
-
-	/* parsing json and validating output */
-	payload_root_value = json_parse_string(payload);
-	if (json_value_get_type(payload_root_value) != JSONObject) {
-		MSG("Error: payload root value is not a JSONObject\n");
-		goto cleanup;
-	}
-
-	payload_identifier_object = json_value_get_object(payload_root_value);
-	if (json_object_get_count(payload_identifier_object) != 1) {
-		MSG("Error: payload identifier cannot be determined");
-		goto cleanup;
-	}
-	/* Ignore status payloads */
-	if (strcmp(json_object_get_name(payload_identifier_object, 0), "stat") == 0) {
-		goto cleanup;
-	}
-	if (strcmp(json_object_get_name(payload_identifier_object, 0), "rxpk") != 0) {
-		MSG("Error: payload identifier unkown");
-		goto cleanup;
-	}
-
-	payload_identifier_value = json_object_get_value(
-							   payload_identifier_object,
-							   json_object_get_name(payload_identifier_object, 0));
-	if (json_value_get_type(payload_identifier_value) != JSONArray) {
-		MSG("Error: payload identifier value is not a JSONArray\n");
-		goto cleanup;
-	}
-	pRetList = make_shared<forward_list<RxpkObject>>();
-	payload_content_array = json_value_get_array(payload_identifier_value);
-	for (i = 0; i < json_array_get_count(payload_content_array); i++) {
-		RxpkObject obj;
-		const char * stringValue = NULL;
-		double numberValue;
-
-		payload_content_object = json_array_get_object(payload_content_array, i);
-
-		/* time */
-		stringValue = json_object_get_string(payload_content_object, "time");
-		if(stringValue != NULL)
-			strptime(stringValue, "%FT%T%z", &obj.time);
-
-		/** tmst, freq, rfch and stat */
-		obj.tmst = json_object_get_number(payload_content_object, "tmst");
-		obj.freq = json_object_get_number(payload_content_object, "chan");
-		obj.rfch = json_object_get_number(payload_content_object, "rfch");
-		obj.stat = json_object_get_number(payload_content_object, "stat");
-		/* modu */
-		stringValue = NULL;
-		stringValue = json_object_get_string(payload_content_object, "modu");
-		if(stringValue != NULL)
-			strncpy(obj.modu, stringValue, sizeof(obj.modu));
-
-		/* datr */
-		// todo: check if datr is string datarate identifier and convert to numeric
-		obj.datr = json_object_get_number(payload_content_object, "datr");
-
-		/* codr */
-		stringValue = NULL;
-		stringValue = json_object_get_string(payload_content_object, "codr");
-		if(stringValue != NULL)
-			strncpy(obj.codr, stringValue, sizeof(obj.codr));
-
-		/* rssi, lsnr and size */
-		obj.rssi = json_object_get_number(payload_content_object, "rssi");
-		obj.lsnr = json_object_get_number(payload_content_object, "lsnr");
-		obj.size = json_object_get_number(payload_content_object, "size");
-
-		/* base64data */
-		stringValue = NULL;
-		stringValue = json_object_get_string(payload_content_object, "data");
-		if(stringValue != NULL)
-			strncpy(obj.base64data, stringValue, sizeof(obj.base64data));
-
-		pRetList->push_front(obj);
-
-	}
-	/* cleanup code */
-cleanup:
-	json_value_free(payload_root_value);
-	return pRetList;
-}
-
-/**
- * Decrypt the FRMPayload in the given PhyPayload structure.
- * Decryption is done in place, so the FRMPayLoad field of phy_payload
- * will contain the plaintext payload
- *
- * @param	phy_payload	Pointer to PhyPayload whose FRMPayload needs to be decrypted
- * @param	aesKey		AES key for decryption
- *
- * @return 	Nonzero on success, zero on failure
- */
-int decrypt_frmpayload(PhyPayload * phy_payload, const unsigned char * aesKey)
-{
-	mbedtls_aes_context aes_ctx;
-	unsigned char aes_nonce_counter[16];
-	unsigned char aes_stream_block[16];
-	unsigned char FRMPayload_decrypted[250];
-	size_t aes_offset = 0;
 
 
-	mbedtls_aes_init(&aes_ctx);
-	mbedtls_aes_setkey_enc(&aes_ctx, default_AppSKey, 128);
-	/* Construct counter for using CTR mode on AES
-	 * The format of the counter is specified in the LoraWan specification
-	 * WARNING: any of the nonce counter's (multi-byte) subfields are little-endian
-	 * */
-	memset(aes_stream_block, 0, 16);
-	memset(aes_nonce_counter, 0, 16);
-	aes_nonce_counter[0] = 0x01;	// hard-coded constant from spec
-	// aes_nonce_counter[1-4] == 0 already from memset
-	aes_nonce_counter[5] = 0; 		// Uplink frame = 0
-	// aes_nonce_counter[6-9] = DevAddr
-	memcpy(&aes_nonce_counter[6], phy_payload->MACPayload.FHDR.DevAddr, sizeof(phy_payload->MACPayload.FHDR.DevAddr));
-	// FCnt field is zero extended to 32 bits
-	aes_nonce_counter[10] = phy_payload->MACPayload.FHDR.FCnt[0];
-	aes_nonce_counter[11] = phy_payload->MACPayload.FHDR.FCnt[1];
-	aes_nonce_counter[12] = 0x00;
-	aes_nonce_counter[13] = 0x00;
-	//aes_nonce_counter[14] == 0 already from memset
-	// actual "counter" that is incremented in CTR mode for every 16-byte block
-	aes_nonce_counter[15] = 1;
-
-	/* Decrypt the FRMPayload using the known AES key */
-	if(mbedtls_aes_crypt_ctr(&aes_ctx,
-							 phy_payload->MACPayload.FRMPayloadLen,
-							 &aes_offset,
-							 aes_nonce_counter,
-							 aes_stream_block,
-							 phy_payload->MACPayload.FRMPayload,
-							 phy_payload->MACPayload.FRMPayload) != 0)
-	{
-		MSG("Error decrypting FRMPayload");
-		return 0;
-	}
-
-
-}
-
-/*
- * Map the raw binary representation of the PHY payload onto a C structure
- *
- * @param phy_payload 		Pointer to caller allocated structure
- * @param raw_payload 		Pointer to buffer containing raw_payload
- * @param raw_payload_size	Size of the raw_payload buffer in bytes
- */
-int phypayload_parse(PhyPayload * phy_payload, unsigned char * raw_payload, size_t raw_payload_size)
-{
-	size_t FOptsLen = 0;
-	memcpy(&phy_payload->MHDR,
-		   raw_payload + offsetof(PhyPayload, MHDR),
-		   sizeof(phy_payload->MHDR));
-	memcpy(&phy_payload->MACPayload.FHDR.DevAddr,
-		   raw_payload + offsetof(PhyPayload, MACPayload.FHDR.DevAddr),
-		   sizeof(phy_payload->MACPayload.FHDR.DevAddr));
-	memcpy(&phy_payload->MACPayload.FHDR.FCtrl,
-		   raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FCtrl),
-		   sizeof(phy_payload->MACPayload.FHDR.FCtrl));
-	memcpy(&phy_payload->MACPayload.FHDR.FCnt,
-		   raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FCnt),
-		   sizeof(phy_payload->MACPayload.FHDR.FCnt));
-
-	FOptsLen = (size_t)(phy_payload->MACPayload.FHDR.FCtrl & 0x3);
-	memcpy(&phy_payload->MACPayload.FHDR.FOpts,
-		   raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FOpts) ,
-		   FOptsLen);
-	memcpy(&phy_payload->MACPayload.FPort,
-		   raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FOpts) + FOptsLen,
-		   sizeof(phy_payload->MACPayload.FPort));
-
-	phy_payload->MACPayload.FRMPayloadLen = (size_t) ((raw_payload + raw_payload_size - sizeof(phy_payload->MIC)) 					 /* address of end of frame - MIC */
-													   - (raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FOpts) + FOptsLen));                    /* address of beginning of FRMPayLoad */
-	memcpy(&phy_payload->MACPayload.FRMPayload, raw_payload+9+FOptsLen, phy_payload->MACPayload.FRMPayloadLen);
-	memcpy(&phy_payload->MIC, raw_payload + raw_payload_size - sizeof(phy_payload->MIC), sizeof(phy_payload->MIC));
-
-}
 
 
 /* -------------------------------------------------------------------------- */
@@ -336,6 +86,10 @@ int phypayload_parse(PhyPayload * phy_payload, unsigned char * raw_payload, size
 
 int main(int argc, char **argv)
 {
+	char szCwd[255];
+	getcwd(szCwd, sizeof(szCwd));
+	OpcServer server(szCwd);
+	server.Start();
 	int i; /* loop variable and temporary variable for return value */
 
 	/* server socket creation */
@@ -372,9 +126,6 @@ int main(int argc, char **argv)
 		MSG("Usage: util_ack <port number>\n");
 		exit(EXIT_FAILURE);
 	}
-
-	/* prepare AES */
-
 
 	/* prepare hints to open network sockets */
 	memset(&hints, 0, sizeof hints);
@@ -464,8 +215,8 @@ int main(int argc, char **argv)
 			continue;
 		}
 
-		print_simple_payload(&databuf[12]);
-		shared_ptr<forward_list<RxpkObject>> pRes = parse_simple_payload(&databuf[12]);
+		packet_fwd_print_payload(&databuf[12]);
+		shared_ptr<forward_list<RxpkObject>> pRes = packet_fwd_parse_payload(&databuf[12]);
 		if(pRes)
 		{
 			int i = 0;
