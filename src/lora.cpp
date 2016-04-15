@@ -1,10 +1,58 @@
 #include <stdio.h>
 #include <string.h>
+#include <memory.h>
 
 #include "lora.h"
 #include "mbedtls/base64.h"				/* mbed TLS for decoding base64 */
 #include "mbedtls/aes.h"				/* for decryping the FRMPayload */
+#include "cmac.h"
+#include "util.h"
 
+
+
+uint32_t compute_mic(uint8_t * data, size_t data_len, const unsigned char * aesKey, LoraDir direction)
+{
+	uint8_t mic_block[16] = {0};
+	AES_CMAC_CTX cmac_ctx;
+	/* length of portion of PHY packet, from MHDR to FRMPayload (inclusive) */
+	size_t MHDR_to_FRMPayload_len = data_len - member_size(PhyPayload, MIC);
+	uint8_t mic_long[16] = {0};
+
+    /*
+	MicBlockB0[5] = dir;
+
+    MicBlockB0[6] = ( address ) & 0xFF;
+    MicBlockB0[7] = ( address >> 8 ) & 0xFF;
+    MicBlockB0[8] = ( address >> 16 ) & 0xFF;
+    MicBlockB0[9] = ( address >> 24 ) & 0xFF;
+
+    MicBlockB0[10] = ( sequenceCounter ) & 0xFF;
+    MicBlockB0[11] = ( sequenceCounter >> 8 ) & 0xFF;
+    MicBlockB0[12] = ( sequenceCounter >> 16 ) & 0xFF;
+    MicBlockB0[13] = ( sequenceCounter >> 24 ) & 0xFF;*/
+
+	mic_block[0] = 0x49;
+	mic_block[5] = direction;
+	memcpy(&mic_block[6],
+		   data + offsetof(PhyPayload, MACPayload.FHDR.DevAddr),
+		   member_size(Fhdr, DevAddr));
+	memcpy(&mic_block[10],
+		   data + offsetof(PhyPayload, MACPayload.FHDR.FCnt),
+		   member_size(Fhdr, FCnt));
+	mic_block[15] = MHDR_to_FRMPayload_len;
+
+	/*memcpy(&mic_block[6],
+		   data + offsetof(PhyPayload, MHDR),
+		   (data + offsetof(PhyPayload, MHDR)) - (data + data_len - sizeof(((PhyPayload *)0)->MIC)));*/
+	AES_CMAC_Init(&cmac_ctx);
+	AES_CMAC_SetKey(&cmac_ctx, aesKey);
+	AES_CMAC_Update(&cmac_ctx, mic_block, sizeof(mic_block));
+	AES_CMAC_Update(&cmac_ctx, data, MHDR_to_FRMPayload_len);
+	AES_CMAC_Final(mic_long, &cmac_ctx);
+
+	int ret_mic = ( uint32_t )( ( uint32_t )mic_long[3] << 24 | ( uint32_t )mic_long[2] << 16 | ( uint32_t )mic_long[1] << 8 | ( uint32_t )mic_long[0] );
+	return ret_mic;
+}
 
 /**
  * Decrypt the FRMPayload in the given PhyPayload structure.

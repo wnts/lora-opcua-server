@@ -1,6 +1,8 @@
 #ifndef SRC_LORA_H_
 #define SRC_LORA_H_
 
+#include <stdint.h>
+
 typedef struct {
 	unsigned char DevAddr[4];
 	unsigned char FCtrl;
@@ -26,6 +28,8 @@ typedef struct {
 	unsigned char MIC[4];
 } PhyPayload;
 
+typedef enum { UPLINK = 0, DOWNLINK = 1 } LoraDir;
+
 /**
  * Decrypt the FRMPayload in the given PhyPayload structure.
  * Decryption is done in place, so the FRMPayLoad field of phy_payload
@@ -46,6 +50,7 @@ int decrypt_frmpayload(PhyPayload * phy_payload, const unsigned char * aesKey);
  */
 int phypayload_parse(PhyPayload * phy_payload, unsigned char * raw_payload, size_t raw_payload_size);
 
+uint32_t compute_mic(uint8_t * data, size_t data_len, const unsigned char * aesKey, LoraDir direction);
 
 
 #endif /* SRC_LORA_H_ */

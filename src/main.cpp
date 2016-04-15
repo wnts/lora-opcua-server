@@ -219,10 +219,9 @@ int main(int argc, char **argv)
 		shared_ptr<forward_list<RxpkObject>> pRes = packet_fwd_parse_payload(&databuf[12]);
 		if(pRes)
 		{
-			int i = 0;
 			for(auto it = pRes->begin(); it != pRes->end(); it++)
 			{
-				i++;
+
 				char phypayload_decoded[PHYPAYLOAD_BUFSIZE];
 				size_t phypayload_decoded_size;
 				/* Base64 Decode the PHYPayload */
@@ -231,13 +230,24 @@ int main(int argc, char **argv)
 										   &phypayload_decoded_size,
 										   (const char *)it->base64data,
 										   strlen((unsigned char *)it->base64data));
+				/* compute MIC */
+				uint32_t mic = compute_mic(phypayload_decoded, phypayload_decoded_size, default_AppSKey, UPLINK);
+				MSG("COMPUTED MIC=%08x\n", mic);
+				MSG("RECEIVED MIC=%08x\n", phy_payload.MIC);
 				/* Map the payload to the PhyPayload Struct */
 				phypayload_parse(&phy_payload, phypayload_decoded, phypayload_decoded_size);
+
+				MSG("MHDR = 0x%02x\n", phy_payload.MHDR);
+				MSG("DevAddr = %08x\n", *(uint32_t *)&phy_payload.MACPayload.FHDR.DevAddr);
+				MSG("FCtrl = %02x\n", phy_payload.MACPayload.FHDR.FCtrl);
+				MSG("FCnt = %d\n", *(uint16_t *)&phy_payload.MACPayload.FHDR.FCnt);
+
+
 				/* Decrypt the FRMPayload of the PhyPayload */
 				decrypt_frmpayload(&phy_payload, default_AppSKey);
 				printf("OBJECT %d DECRYPTED PAYLOAD: %s\n", i, phy_payload.MACPayload.FRMPayload);
 			}
-			printf("PROCESSED %d OBJECTS IN RXPK ARRAY\n", i);
+
 		}
 
 
