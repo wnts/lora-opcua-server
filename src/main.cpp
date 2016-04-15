@@ -233,6 +233,15 @@ int main(int argc, char **argv)
 										   strlen((unsigned char *)it->base64data));
 				/* Map the payload to the PhyPayload Struct */
 				phypayload_parse(&phy_payload, phypayload_decoded, phypayload_decoded_size);
+				uint32_t mic = compute_mic(phypayload_decoded, phypayload_decoded_size, default_AppSKey, UPLINK);
+				/* Compute MIC */
+				printf("COMPUTED MIC = 0x%08x\n", mic);
+				printf("RECEIVED MIC = 0x%02x%02x%02x%02x\n",
+					   phy_payload.MIC[3],
+					   phy_payload.MIC[2],
+					   phy_payload.MIC[1],
+					   phy_payload.MIC[0]);
+
 				/* Decrypt the FRMPayload of the PhyPayload */
 				decrypt_frmpayload(&phy_payload, default_AppSKey);
 				printf("OBJECT %d DECRYPTED PAYLOAD: %s\n", i, phy_payload.MACPayload.FRMPayload);

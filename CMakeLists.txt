@@ -33,7 +33,9 @@ link_directories(${CMAKE_CURRENT_BINARY_DIR})
 add_executable(${EXE_NAME} src/main.cpp
                            src/lora.cpp
                            src/packet_fwd_protocol.cpp
-                           src/parson.c)
+                           src/parson.c
+                           src/aes.c
+                           src/cmac.c)
 target_link_libraries(${EXE_NAME} ${MBEDTLS_LIB_NAME} 
                                   opcuacore
                                   opcuaserver
