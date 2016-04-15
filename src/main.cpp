@@ -1,31 +1,16 @@
-/*
- / _____)             _              | |
-( (____  _____ ____ _| |_ _____  ____| |__
- \____ \| ___ |    (_   _) ___ |/ ___)  _ \
- _____) ) ____| | | || |_| ____( (___| | | |
-(______/|_____)_|_|_| \__)_____)\____)_| |_|
-  (C)2013 Semtech-Cycleo
-
-Description:
-	Network sink, receives UDP packets and sends an acknowledge
-
-License: Revised BSD License, see LICENSE.TXT file include in the project
-Maintainer: Sylvain Miermont
+/* Partially based on code from semtech's poly_packet_forward
+ * See LICENSE
  */
 
 
 /* -------------------------------------------------------------------------- */
 /* --- DEPENDANCIES --------------------------------------------------------- */
 
-/* fix an issue between POSIX and C99 */
-#if __STDC_VERSION__ >= 199901L
-#define _XOPEN_SOURCE 600
-#else
-#define _XOPEN_SOURCE 500
-#endif
+
 
 #include <forward_list>
-#include <memory>
+#include <memory>		/* for smart pointers */
+#include <thread>
 
 #include <stdint.h>		/* C99 types */
 #include <stdio.h>		/* printf, fprintf, sprintf, fopen, fputs */
@@ -86,10 +71,13 @@ using namespace std;
 
 int main(int argc, char **argv)
 {
+	/* start FreeOpcUa server */
 	char szCwd[255];
 	getcwd(szCwd, sizeof(szCwd));
-	OpcServer server(szCwd);
-	server.Start();
+	OpcServer opcServer(szCwd);
+	opcServer.Start();
+
+
 	int i; /* loop variable and temporary variable for return value */
 
 	/* server socket creation */
@@ -111,13 +99,6 @@ int main(int argc, char **argv)
 	uint32_t raw_mac_l; /* Least Significant Nibble, network order */
 	uint64_t gw_mac; /* MAC address of the client (gateway) */
 	uint8_t ack_command;
-
-	PhyPayload phy_payload;
-	size_t FOptsLen;
-	size_t FRMPayloadLen;
-
-
-
 
 	int rc;
 
@@ -223,6 +204,7 @@ int main(int argc, char **argv)
 			for(auto it = pRes->begin(); it != pRes->end(); it++)
 			{
 				i++;
+				PhyPayload phy_payload;
 				char phypayload_decoded[PHYPAYLOAD_BUFSIZE];
 				size_t phypayload_decoded_size;
 				/* Base64 Decode the PHYPayload */

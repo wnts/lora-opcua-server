@@ -31,6 +31,7 @@ link_directories(${CMAKE_CURRENT_BINARY_DIR})
 
 
 add_executable(${EXE_NAME} src/main.cpp
+                           src/loranode.cpp
                            src/lora.cpp
                            src/packet_fwd_protocol.cpp
                            src/parson.c
