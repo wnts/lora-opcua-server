@@ -13,25 +13,25 @@
  */
 class LoraNode : public BaseObject
 {
-	public:
-		LoraNode(OpcUa::NodeId nodeId,
-				 OpcUa::LocalizedText browseName,
-				 OpcUa::LocalizedText description,
-				 OpcUa::LocalizedText,
-				 NodeManager * pNodeManager,
-				 OpcUa::NodeId parentNode,
-				 OpcUa::NodeId parentReferenceType);
-		~LoraNode();
-		int addSensor(std::shared_ptr<Node> pSensorNode);
-		OpcUa::NodeId getType();
-	protected:
-		static bool s_createdTypes;
-		static std::shared_ptr<BaseObject> s_pSensorCollectionInstDecl;
-		static std::shared_ptr<Property> s_pDevEUIInstDecl;
-		std::shared_ptr<BaseObject> m_pSensorCollection;
-		std::shared_ptr<Property> m_pDevEUI;
-	private:
-		void createTypes(NodeManager * pNodeManager);
+    public:
+        LoraNode(OpcUa::NodeId nodeId,
+                 OpcUa::LocalizedText browseName,
+                 OpcUa::LocalizedText description,
+                 OpcUa::LocalizedText,
+                 NodeManager * pNodeManager,
+                 OpcUa::NodeId parentNode,
+                 OpcUa::NodeId parentReferenceType);
+        ~LoraNode();
+        int addSensor(std::shared_ptr<Node> pSensorNode);
+        OpcUa::NodeId getType();
+    protected:
+        static bool s_createdTypes;
+        static std::shared_ptr<BaseObject> s_pSensorCollectionInstDecl;
+        static std::shared_ptr<Property> s_pDevEUIInstDecl;
+        std::shared_ptr<BaseObject> m_pSensorCollection;
+        std::shared_ptr<Property> m_pDevEUI;
+    private:
+        void createTypes(NodeManager * pNodeManager);
 
 };
 

@@ -5,21 +5,21 @@
 #include <memory>
 
 typedef struct {
-	struct tm time;
-	uint32_t tmst;
-	float freq;
-	unsigned int chan;
-	unsigned int rfch;
-	char stat;
-	char modu[5] = "";
-	unsigned int datr;
-	// todo how long should this be?
-	char codr[10] = "";
-	int rssi;
-	float lsnr;
-	size_t size;
-	// todo how long should this be?
-	char base64data[400] = "";
+    struct tm time;
+    uint32_t tmst;
+    float freq;
+    unsigned int chan;
+    unsigned int rfch;
+    char stat;
+    char modu[5] = "";
+    unsigned int datr;
+    // todo how long should this be?
+    char codr[10] = "";
+    int rssi;
+    float lsnr;
+    size_t size;
+    // todo how long should this be?
+    char base64data[400] = "";
 } RxpkObject;
 
 void packet_fwd_print_payload(char * payload);

@@ -9,17 +9,17 @@
  */
 
 typedef struct __attribute__((__packed__)) {
-	uint32_t DevAddr;
-	unsigned char FCtrl;
-	unsigned char FCnt[2];
-	unsigned char FOpts[15];
+    uint32_t DevAddr;
+    unsigned char FCtrl;
+    unsigned char FCnt[2];
+    unsigned char FOpts[15];
 } Fhdr;
 
 typedef struct __attribute__((__packed__)) {
-	Fhdr FHDR;
-	unsigned char FPort;
-	unsigned char FRMPayload[250]; /* Maximum allowed for Datarate 7 */
-	unsigned char FRMPayloadLen;
+    Fhdr FHDR;
+    unsigned char FPort;
+    unsigned char FRMPayload[250]; /* Maximum allowed for Datarate 7 */
+    unsigned char FRMPayloadLen;
 } MacPayload;
 
 /**
@@ -28,9 +28,9 @@ typedef struct __attribute__((__packed__)) {
  *
  */
 typedef struct __attribute__((__packed__)) {
-	unsigned char MHDR;
-	MacPayload MACPayload;
-	unsigned char MIC[4];
+    unsigned char MHDR;
+    MacPayload MACPayload;
+    unsigned char MIC[4];
 } PhyPayload;
 
 typedef enum { UPLINK = 0, DOWNLINK = 1 } LoraDir;
