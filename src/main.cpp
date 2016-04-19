@@ -33,6 +33,8 @@
 #include "mbedtls/base64.h"
 
 #include "opcserver.h"
+#include "nmlora.h"
+#include "loranode.h"
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE MACROS ------------------------------------------------------- */
@@ -62,6 +64,12 @@ static const unsigned char default_AppSKey[] = {
 
 using namespace std;
 
+void recv_packet_forwarder(const char * port);
+shared_ptr<LoraNode> g_pLoraNode;
+shared_ptr<TemperatureSensor> g_pTemperatureSensor;
+
+
+
 
 
 
@@ -71,12 +79,42 @@ using namespace std;
 
 int main(int argc, char **argv)
 {
+
+	/* check if port number was passed as parameter */
+	if (argc != 2) {
+		MSG("Usage: %s <port number>\n", argv[0]);
+		exit(EXIT_FAILURE);
+	}
+
 	/* start FreeOpcUa server */
 	char szCwd[255];
 	getcwd(szCwd, sizeof(szCwd));
 	OpcServer opcServer(szCwd);
 	opcServer.Start();
+	NmLora * pNodeManager = new NmLora();
+	opcServer.addNodeManager(pNodeManager);
+	g_pLoraNode = make_shared<LoraNode>(NodeId("LoraNode1", pNodeManager->getNamespaceIdx()),
+									    LocalizedText("LoraNode1"),
+									    LocalizedText("LoraNode1"),
+									    LocalizedText("LoraNode1"),
+									    pNodeManager,
+									    ObjectId::ObjectsFolder,
+									    ReferenceId::Organizes);
+	g_pTemperatureSensor = make_shared<TemperatureSensor>(NodeId("TemperatureSensor1", pNodeManager->getNamespaceIdx()),
+										     			  LocalizedText("TempertatureSensor1"),
+														  LocalizedText("TempertatureSensor1"),
+														  LocalizedText("TempertatureSensor1"),
+														  pNodeManager,
+														  ObjectId::Null,
+														  ObjectId::HasComponent);
+	g_pLoraNode->addSensor(g_pTemperatureSensor);
+	recv_packet_forwarder(argv[1]);
 
+
+}
+
+void recv_packet_forwarder(const char * port)
+{
 
 	int i; /* loop variable and temporary variable for return value */
 
@@ -102,11 +140,7 @@ int main(int argc, char **argv)
 
 	int rc;
 
-	/* check if port number was passed as parameter */
-	if (argc != 2) {
-		MSG("Usage: util_ack <port number>\n");
-		exit(EXIT_FAILURE);
-	}
+
 
 	/* prepare hints to open network sockets */
 	memset(&hints, 0, sizeof hints);
@@ -115,7 +149,7 @@ int main(int argc, char **argv)
 	hints.ai_flags = AI_PASSIVE; /* will assign local IP automatically */
 
 	/* look for address */
-	i = getaddrinfo(NULL, argv[1], &hints, &result);
+	i = getaddrinfo(NULL, port, &hints, &result);
 	if (i != 0) {
 		MSG("ERROR: getaddrinfo returned %s\n", gai_strerror(i));
 		exit(EXIT_FAILURE);
@@ -146,7 +180,7 @@ int main(int argc, char **argv)
 		}
 		exit(EXIT_FAILURE);
 	}
-	MSG("INFO: util_ack listening on port %s\n", argv[1]);
+	MSG("INFO: listening on port %s\n", port);
 	freeaddrinfo(result);
 
 	while (1) {
@@ -163,7 +197,7 @@ int main(int argc, char **argv)
 			MSG("ERROR: getnameinfo returned %s \n", gai_strerror(i));
 			exit(EXIT_FAILURE);
 		}
-		printf(" -> pkt in , host %s (port %s), %i bytes", host_name, port_name, byte_nb);
+		//printf(" -> pkt in , host %s (port %s), %i bytes", host_name, port_name, byte_nb);
 
 		/* check and parse the payload */
 		if (byte_nb < 12) { /* not enough bytes for packet from gateway */
@@ -182,21 +216,21 @@ int main(int argc, char **argv)
 		/* interpret gateway command */
 		switch (databuf[3]) {
 		case PKT_PUSH_DATA:
-			printf(", PUSH_DATA from gateway 0x%08X%08X\n", (uint32_t)(gw_mac >> 32), (uint32_t)(gw_mac & 0xFFFFFFFF));
+			//printf(", PUSH_DATA from gateway 0x%08X%08X\n", (uint32_t)(gw_mac >> 32), (uint32_t)(gw_mac & 0xFFFFFFFF));
 			ack_command = PKT_PUSH_ACK;
-			printf("<-  pkt out, PUSH_ACK for host %s (port %s)", host_name, port_name);
+			//printf("<-  pkt out, PUSH_ACK for host %s (port %s)", host_name, port_name);
 			break;
 		case PKT_PULL_DATA:
-			printf(", PULL_DATA from gateway 0x%08X%08X\n", (uint32_t)(gw_mac >> 32), (uint32_t)(gw_mac & 0xFFFFFFFF));
+			//printf(", PULL_DATA from gateway 0x%08X%08X\n", (uint32_t)(gw_mac >> 32), (uint32_t)(gw_mac & 0xFFFFFFFF));
 			ack_command = PKT_PULL_ACK;
-			printf("<-  pkt out, PULL_ACK for host %s (port %s)", host_name, port_name);
+			//printf("<-  pkt out, PULL_ACK for host %s (port %s)", host_name, port_name);
 			break;
 		default:
-			printf(", unexpected command %u\n", databuf[3]);
+			//printf(", unexpected command %u\n", databuf[3]);
 			continue;
 		}
 
-		packet_fwd_print_payload(&databuf[12]);
+		//packet_fwd_print_payload(&databuf[12]);
 		shared_ptr<forward_list<RxpkObject>> pRes = packet_fwd_parse_payload(&databuf[12]);
 		if(pRes)
 		{
@@ -215,20 +249,18 @@ int main(int argc, char **argv)
 										   strlen((unsigned char *)it->base64data));
 				/* Map the payload to the PhyPayload Struct */
 				phypayload_parse(&phy_payload, phypayload_decoded, phypayload_decoded_size);
-				uint32_t mic = compute_mic(phypayload_decoded, phypayload_decoded_size, default_AppSKey, UPLINK);
-				/* Compute MIC */
-				printf("COMPUTED MIC = 0x%08x\n", mic);
-				printf("RECEIVED MIC = 0x%02x%02x%02x%02x\n",
-					   phy_payload.MIC[3],
-					   phy_payload.MIC[2],
-					   phy_payload.MIC[1],
-					   phy_payload.MIC[0]);
-
+				/* verify PHY packet's MIC */
+				if(!loraphy_mic_verify(phypayload_decoded, phypayload_decoded_size, default_AppSKey, UPLINK))
+				{
+					MSG("Invalid MIC on Lora PHY packet! Ignoring... \n");
+					continue;
+				}
 				/* Decrypt the FRMPayload of the PhyPayload */
 				decrypt_frmpayload(&phy_payload, default_AppSKey);
-				printf("OBJECT %d DECRYPTED PAYLOAD: %s\n", i, phy_payload.MACPayload.FRMPayload);
+				g_pTemperatureSensor->setTemperature(20, mktime(&it->time));
+
 			}
-			printf("PROCESSED %d OBJECTS IN RXPK ARRAY\n", i);
+
 		}
 
 

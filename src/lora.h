@@ -3,14 +3,19 @@
 
 #include <stdint.h>
 
-typedef struct {
-	unsigned char DevAddr[4];
+/**
+ * Structs are packed to prevent padding.
+ * This way we can use the offsetof macro to determine binary offsets in raw payload
+ */
+
+typedef struct __attribute__((__packed__)) {
+	uint32_t DevAddr;
 	unsigned char FCtrl;
 	unsigned char FCnt[2];
 	unsigned char FOpts[15];
 } Fhdr;
 
-typedef struct {
+typedef struct __attribute__((__packed__)) {
 	Fhdr FHDR;
 	unsigned char FPort;
 	unsigned char FRMPayload[250]; /* Maximum allowed for Datarate 7 */
@@ -22,7 +27,7 @@ typedef struct {
  * specified in the LoraWan specification.
  *
  */
-typedef struct {
+typedef struct __attribute__((__packed__)) {
 	unsigned char MHDR;
 	MacPayload MACPayload;
 	unsigned char MIC[4];
@@ -31,7 +36,10 @@ typedef struct {
 typedef enum { UPLINK = 0, DOWNLINK = 1 } LoraDir;
 
 
-uint32_t compute_mic(uint8_t * data, size_t data_len, const unsigned char * aesKey, LoraDir direction);
+uint32_t loraphy_mic_compute(uint8_t * data, size_t data_len, const unsigned char * aesKey, LoraDir direction);
+
+int loraphy_mic_verify(uint8_t * data, size_t data_len, const unsigned char * aesKey, LoraDir direction);
+
 
 /**
  * Decrypt the FRMPayload in the given PhyPayload structure.

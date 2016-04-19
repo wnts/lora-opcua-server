@@ -30,13 +30,15 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/freeopcua-test/include)
 link_directories(${CMAKE_CURRENT_BINARY_DIR})
 
 
-add_executable(${EXE_NAME} src/main.cpp
-                           src/loranode.cpp
-                           src/lora.cpp
+add_executable(${EXE_NAME} src/main.cpp                    
                            src/packet_fwd_protocol.cpp
                            src/parson.c
                            src/aes.c
-                           src/cmac.c)
+                           src/cmac.c
+                           src/loranode.cpp
+                           src/temperaturesensor.cpp
+                           src/lora.cpp
+                           src/nmlora.cpp)
 target_link_libraries(${EXE_NAME} ${MBEDTLS_LIB_NAME} 
                                   opcuacore
                                   opcuaserver

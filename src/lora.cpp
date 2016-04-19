@@ -12,9 +12,15 @@ extern "C"
 
 #define member_size(type, member) sizeof(((type *)0)->member)
 
+int loraphy_mic_verify(uint8_t * data, size_t data_len, const unsigned char * aesKey, LoraDir direction)
+{
+	uint32_t mic_computed = loraphy_mic_compute(data, data_len, aesKey, direction);
+	uint32_t mic_received = *(uint32_t *)(data + data_len - member_size(PhyPayload, MIC));
+	return (mic_computed == mic_received);
 
+}
 
-uint32_t compute_mic(uint8_t * data, size_t data_len, const unsigned char * aesKey, LoraDir direction)
+uint32_t loraphy_mic_compute(uint8_t * data, size_t data_len, const unsigned char * aesKey, LoraDir direction)
 {
 	uint8_t mic_block[16] = {0};
 	AES_CMAC_CTX cmac_ctx;
@@ -88,7 +94,7 @@ int decrypt_frmpayload(PhyPayload * phy_payload, const unsigned char * aesKey)
 	// aes_nonce_counter[1-4] == 0 already from memset
 	aes_nonce_counter[5] = 0; 		// Uplink frame = 0
 	// aes_nonce_counter[6-9] = DevAddr
-	memcpy(&aes_nonce_counter[6], phy_payload->MACPayload.FHDR.DevAddr, sizeof(phy_payload->MACPayload.FHDR.DevAddr));
+	memcpy(&aes_nonce_counter[6], &phy_payload->MACPayload.FHDR.DevAddr, sizeof(phy_payload->MACPayload.FHDR.DevAddr));
 	// FCnt field is zero extended to 32 bits
 	aes_nonce_counter[10] = phy_payload->MACPayload.FHDR.FCnt[0];
 	aes_nonce_counter[11] = phy_payload->MACPayload.FHDR.FCnt[1];
@@ -143,5 +149,7 @@ int phypayload_parse(PhyPayload * phy_payload, unsigned char * raw_payload, size
 													   - (raw_payload + offsetof(PhyPayload, MACPayload.FHDR.FOpts) + FOptsLen));                    /* address of beginning of FRMPayLoad */
 	memcpy(&phy_payload->MACPayload.FRMPayload, raw_payload+9+FOptsLen, phy_payload->MACPayload.FRMPayloadLen);
 	memcpy(&phy_payload->MIC, raw_payload + raw_payload_size - sizeof(phy_payload->MIC), sizeof(phy_payload->MIC));
+
+	printf("DEVADDR = %08x\n", phy_payload->MACPayload.FHDR.DevAddr);
 
 }
