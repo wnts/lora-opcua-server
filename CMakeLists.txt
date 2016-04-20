@@ -39,9 +39,13 @@ add_executable(${EXE_NAME} src/main.cpp
                            src/temperaturesensor.cpp
                            src/lora.cpp
                            src/nmlora.cpp)
-target_link_libraries(${EXE_NAME} ${MBEDTLS_LIB_NAME} 
-                                  opcuacore
-                                  opcuaserver
-                                  opcuaprotocol 
+
+find_library(LIBOPCUASERVER opcuaserver)
+find_library(LIBOPCUACORE opcuacore)
+find_library(LIBOPCUAPROTOCOL opcuaprotocol)
+target_link_libraries(${EXE_NAME} ${MBEDTLS_LIB_NAME}
+                                  ${LIBOPCUASERVER} 
+                                  ${LIBOPCUACORE}
+                                  ${LIBOPCUAPROTOCOL}
                                   freeopcuatest)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fpermissive")
